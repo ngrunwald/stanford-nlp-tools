@@ -1,0 +1,2 @@
+#!/bin/bash
+mvn install:install-file -DgroupId=stanford-nlp-tools -DartifactId=stanford-nlp-tools -Dversion=0.1.0-SNAPSHOT -Dpackaging=jar -Dfile=stanford-postagger-2012-03-09.jar
