@@ -1,7 +1,9 @@
 (ns stanford-nlp-tools.postagger
-  (:import [edu.stanford.nlp.tagger.maxent MaxentTagger]
-           [edu.stanford.nlp.ling HasWord Word])
-  (:require [clojure.string :as str]))
+  (:import [edu.stanford.nlp.tagger.maxent MaxentTagger TaggerConfig]
+           [edu.stanford.nlp.ling HasWord Word]
+           [java.util Properties])
+  (:require [clojure.string :as str]
+            [clojure.java.io :as io]))
 
 (def ^{:dynamic true} *tagger*)
 
@@ -12,8 +14,12 @@
        ~@body)))
 
 (defn make-pos-tagger
-  [model]
-  (MaxentTagger. model))
+  [model & [config]]
+  (if config
+    (MaxentTagger. model (TaggerConfig.
+                          (doto (Properties.)
+                            (.load (io/reader config)))))
+    (MaxentTagger. model)))
 
 (defprotocol Wordable
   (make-word [word] "creates a Word"))
