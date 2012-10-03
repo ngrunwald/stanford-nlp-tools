@@ -78,7 +78,8 @@
 
 (defn contains-ts?
   [^TypesafeMap ts-map k]
-  (.has (get kw->annotations k k)))
+  (let [^Class klass (get kw->annotations k k)]
+    (.has ts-map klass)))
 
 (defn get-tags
   [tok]
