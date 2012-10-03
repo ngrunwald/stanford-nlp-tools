@@ -3,37 +3,94 @@
   (:require [clojure.string :as str])
   (:import [edu.stanford.nlp.ling TaggedWord]
            [edu.stanford.nlp.util Timing]
-           [edu.stanford.nlp.pipeline Annotation]
-           [edu.stanford.nlp.tagger.maxent MaxentTagger]))
+           [edu.stanford.nlp.pipeline Annotation TokensRegexAnnotator$Options]
+           [edu.stanford.nlp.tagger.maxent MaxentTagger]
+           [edu.stanford.nlp.ling.tokensregex
+            TokenSequencePattern
+            CoreMapExpressionExtractor]
+           [java.util ArrayList]))
 
 (defmacro with-timing
   [id & body]
   `(if (empty? ~id)
      ~@body
-     (let [t (Timing.)]
-       (.doing t (str "Beginning operation " (name id)))
-       ~@body
-       (.done t))))
+     (let [t# (Timing.)]
+       (.doing t# (str "Beginning operation " (name ~id)))
+       (let [return# ~@body]
+         (.done t#)
+         return#))))
 
 (defn make-pipeline
   [specs]
   (let [annotators (for [[fun conf] specs]
                      (fun conf))
-        pipeline (apply comp annotators)]
+        pipeline (apply comp (reverse annotators))]
     pipeline))
+
+;;
+;; MAXENT POS Tagger
+;;
+
+(defn tag-tokens!
+  [model cmap]
+  (let [tokens (get-ts cmap :tokens)
+        words (.apply model tokens)]
+    (doseq [idx (range 0 (dec (count tokens)))
+            :let [token (.get tokens idx)
+                  ^TaggedWord word (.get words idx)]]
+      (assoc-ts! token :part-of-speech (.tag word)))
+    nil))
 
 (defn make-pos-tagger
   [conf]
-  (let [model-path (get conf :model-path (get conf :pos.model))
+  (let [model-path (get conf :model (get conf :pos.model))
         max-length (get conf :max-length (get conf :pos.maxlen))
-        verbose  (get conf :verbose)
+        verbose (get conf :verbose)
         model (MaxentTagger. model-path)]
     (fn [document]
       (with-timing (if verbose (str "pos-tagging with model " model-path))
-        (let [tokens (get-ts ann :tokens)
-              words (.apply model tokens)]
-          (doseq [idx (range 0 (dec (count tokens)))
-                  :let [token (.get tokens idx)
-                        ^TaggedWord word (.get words idx)]]
-            (assoc-ts! token :part-of-speech (.tag word)))
-          document)))))
+        (if-let [sentences (get-ts document :sentences)]
+          (doseq [sentence sentences]
+            (tag-tokens! model sentence))
+          (tag-tokens! model document)))
+      document)))
+
+;;
+;; Tokens Regexp
+;;
+
+(defn add-token-offsets!
+  [annotation]
+  (let [tokens (get-ts annotation :tokens)]
+    (doseq [idx (range 0 (dec (count tokens)))]
+      (assoc-ts! (.get tokens idx) :token-begin idx :token-end idx))
+    annotation))
+
+(defn apply-tokens-regexp!
+  [extractor cmap]
+  (let [cms (.extractCoreMapsMergedWithTokens extractor cmap)]
+    (assoc-ts! cmap :tokens cms)))
+
+(defn make-tokens-regexp
+  [{:keys [rules verbose add-token-offsets]}]
+  (let [rules-paths (if (coll? rules)
+                      rules
+                      [rules])
+        env (TokenSequencePattern/getNewEnv)
+        extractor (CoreMapExpressionExtractor/createExtractorFromFiles
+                   env (ArrayList. rules-paths))
+        options (TokensRegexAnnotator$Options.)]
+    (.bind env "options" options)
+    (fn [document]
+      (with-timing (if verbose
+                     (str "regexp token extraction with rules " (str/join ", " rules-paths)))
+        (if-let [sentences (get-ts document :sentences)]
+          (doseq [sentence sentences]
+            (if add-token-offsets
+              (add-token-offsets! sentence))
+            (apply-tokens-regexp! extractor sentence))
+          (do
+            (if add-token-offsets
+              (add-token-offsets! document))
+            (apply-tokens-regexp! extractor document))))
+      document)))
