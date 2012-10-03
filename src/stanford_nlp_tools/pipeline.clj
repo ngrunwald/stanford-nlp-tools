@@ -8,7 +8,9 @@
            [edu.stanford.nlp.ling.tokensregex
             TokenSequencePattern
             CoreMapExpressionExtractor]
-           [java.util ArrayList]))
+           [java.util ArrayList Collection]))
+
+(set! *warn-on-reflection* true)
 
 (defmacro with-timing
   [id & body]
@@ -32,8 +34,8 @@
 ;;
 
 (defn tag-tokens!
-  [model cmap]
-  (let [tokens (get-ts cmap :tokens)
+  [^MaxentTagger model cmap]
+  (let [^ArrayList tokens (get-ts cmap :tokens)
         words (.apply model tokens)]
     (doseq [idx (range 0 (dec (count tokens)))
             :let [token (.get tokens idx)
@@ -43,7 +45,7 @@
 
 (defn make-pos-tagger
   [conf]
-  (let [model-path (get conf :model (get conf :pos.model))
+  (let [^String model-path (get conf :model (get conf :pos.model))
         max-length (get conf :max-length (get conf :pos.maxlen))
         verbose (get conf :verbose)
         model (MaxentTagger. model-path)]
@@ -61,19 +63,19 @@
 
 (defn add-token-offsets!
   [annotation]
-  (let [tokens (get-ts annotation :tokens)]
+  (let [^ArrayList tokens (get-ts annotation :tokens)]
     (doseq [idx (range 0 (dec (count tokens)))]
       (assoc-ts! (.get tokens idx) :token-begin idx :token-end idx))
     annotation))
 
 (defn apply-tokens-regexp!
-  [extractor cmap]
+  [^CoreMapExpressionExtractor extractor cmap]
   (let [cms (.extractCoreMapsMergedWithTokens extractor cmap)]
     (assoc-ts! cmap :tokens cms)))
 
 (defn make-tokens-regexp
   [{:keys [rules verbose add-token-offsets]}]
-  (let [rules-paths (if (coll? rules)
+  (let [^Collection rules-paths (if (coll? rules)
                       rules
                       [rules])
         env (TokenSequencePattern/getNewEnv)
