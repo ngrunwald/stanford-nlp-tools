@@ -10,8 +10,6 @@
             CoreMapExpressionExtractor]
            [java.util ArrayList Collection]))
 
-(set! *warn-on-reflection* true)
-
 (defmacro with-timing
   [id & body]
   `(if (empty? ~id)
@@ -33,28 +31,48 @@
 ;; MAXENT POS Tagger
 ;;
 
-(defn tag-tokens!
-  [^MaxentTagger model cmap]
-  (let [^ArrayList tokens (get-ts cmap :tokens)
-        words (.apply model tokens)]
+(defn tag-sentence!
+  [^MaxentTagger model ^ArrayList tokens]
+  (let [words (.apply model tokens)]
     (doseq [idx (range 0 (dec (count tokens)))
             :let [token (.get tokens idx)
                   ^TaggedWord word (.get words idx)]]
-      (assoc-ts! token :part-of-speech (.tag word)))
-    nil))
+      (assoc-ts! token :part-of-speech (.tag word)))))
+
+(defn tag-tokens!
+  ([model cmap max-length]
+     (let [^ArrayList all-tokens (get-ts cmap :tokens)
+           text-size (count all-tokens)]
+       (if (< text-size max-length)
+         (tag-sentence! model all-tokens)
+         (loop [idx 0
+                ^ArrayList chunk (ArrayList.)]
+           (if (< idx text-size)
+             (let [token (.get all-tokens idx)]
+               (.add chunk token)
+               (if (= max-length (count chunk))
+                 (do
+                   ;; add a token... find out why
+                   (.add chunk (.get all-tokens (inc idx)))
+                   (tag-sentence! model chunk)
+                   (recur (inc idx) (ArrayList.)))
+                 (recur (inc idx) chunk)))
+             (if-not (empty? chunk)
+               (tag-sentence! model chunk)))))
+       nil)))
 
 (defn make-pos-tagger
   [conf]
   (let [^String model-path (get conf :model (get conf :pos.model))
-        max-length (get conf :max-length (get conf :pos.maxlen))
+        max-length (get conf :max-length (get conf :pos.maxlen 200))
         verbose (get conf :verbose)
         model (MaxentTagger. model-path)]
     (fn [document]
       (with-timing (if verbose (str "pos-tagging with model " model-path))
         (if-let [sentences (get-ts document :sentences)]
           (doseq [sentence sentences]
-            (tag-tokens! model sentence))
-          (tag-tokens! model document)))
+            (tag-tokens! model sentence max-length))
+          (tag-tokens! model document max-length)))
       document)))
 
 ;;
@@ -76,8 +94,8 @@
 (defn make-tokens-regexp
   [{:keys [rules verbose add-token-offsets]}]
   (let [^Collection rules-paths (if (coll? rules)
-                      rules
-                      [rules])
+                                  rules
+                                  [rules])
         env (TokenSequencePattern/getNewEnv)
         extractor (CoreMapExpressionExtractor/createExtractorFromFiles
                    env (ArrayList. rules-paths))
