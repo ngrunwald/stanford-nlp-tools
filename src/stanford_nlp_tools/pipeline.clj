@@ -17,15 +17,18 @@
      (let [t# (Timing.)]
        (.doing t# (str "Beginning operation " (name ~id)))
        (let [return# ~@body]
-         (.done t#)
+         (.stop t# "done!")
          return#))))
 
 (defn make-pipeline
-  [specs]
+  [{:keys [verbose]} specs]
   (let [annotators (for [[fun conf] specs]
                      (fun conf))
-        pipeline (apply comp (reverse annotators))]
-    pipeline))
+        pipeline (apply comp (reverse annotators))
+        full-pipeline (if verbose
+                        (fn [doc] (with-timing "pipeline" (pipeline doc)))
+                        pipeline)]
+    full-pipeline))
 
 ;;
 ;; MAXENT POS Tagger
@@ -102,8 +105,9 @@
         options (TokensRegexAnnotator$Options.)]
     (.bind env "options" options)
     (fn [document]
-      (with-timing (if verbose
-                     (str "regexp token extraction with rules " (str/join ", " rules-paths)))
+      (with-timing
+        (if verbose
+          (str "regexp token extraction with rules " (str/join ", " rules-paths)))
         (if-let [sentences (get-ts document :sentences)]
           (doseq [sentence sentences]
             (if add-token-offsets
