@@ -3,7 +3,10 @@
   (:require [clojure.string :as str])
   (:import [edu.stanford.nlp.ling TaggedWord]
            [edu.stanford.nlp.util Timing]
-           [edu.stanford.nlp.pipeline Annotation TokensRegexAnnotator$Options]
+           [edu.stanford.nlp.pipeline
+            Annotation TokensRegexAnnotator$Options
+            PTBTokenizerAnnotator WordsToSentencesAnnotator
+            MorphaAnnotator]
            [edu.stanford.nlp.tagger.maxent MaxentTagger]
            [edu.stanford.nlp.ling.tokensregex
             TokenSequencePattern
@@ -13,10 +16,10 @@
 (defmacro with-timing
   [id & body]
   `(if (empty? ~id)
-     ~@body
+     (do ~@body)
      (let [t# (Timing.)]
        (.doing t# (str "Beginning operation " (name ~id)))
-       (let [return# ~@body]
+       (let [return# (do ~@body)]
          (.stop t# "done!")
          return#))))
 
@@ -29,6 +32,37 @@
                         (fn [doc] (with-timing "pipeline" (pipeline doc)))
                         pipeline)]
     full-pipeline))
+
+;;
+;; Tokenizers
+;;
+
+(defn make-ptb-tokenizer
+  [{:keys [options verbose] :as conf
+    :or {:verbose false}}]
+  (let [tokenizer (if options
+                    (PTBTokenizerAnnotator. false options)
+                    (PTBTokenizerAnnotator. false))]
+    (fn [text-or-document]
+      (with-timing (if verbose "ptb-tokenization")
+        (let [document (if (string? text-or-document)
+                         (Annotation. text-or-document)
+                         text-or-document)]
+          (.annotate tokenizer document)
+          document)))))
+
+;;
+;; Sentence Splitter
+;;
+
+(defn make-sentence-splitter
+  [{:keys [verbose] :as conf
+    :or {:verbose false}}]
+  (let [splitter (WordsToSentencesAnnotator. false)]
+    (fn [^Annotation document]
+      (with-timing (if verbose "sentence-splitting")
+        (.annotate splitter document)
+        document))))
 
 ;;
 ;; MAXENT POS Tagger
@@ -70,13 +104,26 @@
         max-length (get conf :max-length (get conf :pos.maxlen 200))
         verbose (get conf :verbose)
         model (MaxentTagger. model-path)]
-    (fn [document]
+    (fn [^Annotation document]
       (with-timing (if verbose (str "pos-tagging with model " model-path))
         (if-let [sentences (get-ts document :sentences)]
           (doseq [sentence sentences]
             (tag-tokens! model sentence max-length))
           (tag-tokens! model document max-length)))
       document)))
+
+;;
+;; Morphology
+;;
+
+(defn make-english-lemmatizer
+  [{:keys [verbose] :as conf
+    :or {:verbose false}}]
+  (let [lemmatizer (MorphaAnnotator. false)]
+    (fn [^Annotation document]
+      (with-timing (if verbose "morphology processing")
+        (.annotate lemmatizer document)
+        document))))
 
 ;;
 ;; Tokens Regexp
